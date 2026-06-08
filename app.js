@@ -229,7 +229,6 @@
             const item = document.createElement('div');
             item.className   = 'sticker-item' + (selectedSet.has(index) ? ' selected' : '');
             item.dataset.index = index;
-            item.style.animationDelay = `${Math.min(index, 20) * 30}ms`;
 
             item.innerHTML = `
                 <div class="checkbox-wrapper">

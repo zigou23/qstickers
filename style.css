@@ -55,20 +55,7 @@ body {
     overflow-x: hidden;
 }
 
-body::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background:
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.12), transparent),
-        radial-gradient(ellipse 60% 40% at 80% 50%, rgba(96, 165, 250, 0.06), transparent),
-        radial-gradient(ellipse 60% 40% at 20% 80%, rgba(52, 211, 153, 0.05), transparent);
-    pointer-events: none;
-    z-index: 0;
-}
+
 
 /* ===== App Container ===== */
 .app-container {
@@ -148,27 +135,7 @@ body::before {
 }
 
 .input-card-glow {
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: conic-gradient(
-        from 180deg at 50% 50%,
-        transparent 0deg,
-        rgba(99, 102, 241, 0.04) 60deg,
-        rgba(96, 165, 250, 0.06) 120deg,
-        transparent 180deg,
-        rgba(52, 211, 153, 0.04) 240deg,
-        transparent 360deg
-    );
-    animation: glowRotate 20s linear infinite;
-    pointer-events: none;
-}
-
-@keyframes glowRotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    display: none;
 }
 
 .input-title {
@@ -272,12 +239,11 @@ body::before {
 }
 
 .fetch-btn:hover {
-    transform: translateY(-1px);
     box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
 }
 
 .fetch-btn:active {
-    transform: translateY(0);
+    opacity: 0.85;
 }
 
 .fetch-btn svg {
@@ -391,18 +357,6 @@ body::before {
 /* ===== Result Section ===== */
 .result-section {
     padding-bottom: 40px;
-    animation: fadeInUp 0.5s ease forwards;
-}
-
-@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
 }
 
 /* Sticker Header */
@@ -545,14 +499,12 @@ body::before {
 }
 
 .download-btn:hover {
-    transform: translateY(-1px);
     box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
 }
 
 .download-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    transform: none;
 }
 
 .download-btn svg {
@@ -623,27 +575,17 @@ body::before {
     border-radius: var(--radius-md);
     overflow: hidden;
     cursor: pointer;
-    transition: all var(--transition-normal);
-    animation: itemFadeIn 0.4s ease forwards;
-    opacity: 0;
-}
-
-@keyframes itemFadeIn {
-    to {
-        opacity: 1;
-    }
+    transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
 .sticker-item:hover {
     border-color: rgba(96, 165, 250, 0.3);
     background: var(--bg-card-hover);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
 }
 
 .sticker-item.selected {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-glow), 0 0 20px var(--accent-glow);
+    box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .sticker-item .checkbox-wrapper {
@@ -675,11 +617,6 @@ body::before {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
-    transition: transform var(--transition-normal);
-}
-
-.sticker-item:hover .sticker-img {
-    transform: scale(1.08);
 }
 
 .type-badge {
