@@ -1,8 +1,8 @@
 /**
  * QQ Sticker Viewer - App Logic
- * - 图片加载时同步缓存 Blob 到内存
- * - 打包下载完全在前端完成，直接取缓存 Blob，无重复网络请求
- * - 文件名格式：01.名称.gif / 01.名称.png
+ * - Images are preloaded into an in-memory Blob cache.
+ * - Single-image downloads save the cached image directly.
+ * - Multi-image downloads are zipped in the browser.
  */
 
 (function () {
@@ -26,6 +26,7 @@
     const viewListBtn    = document.getElementById('view-list');
     const downloadGifBtn = document.getElementById('download-gif-btn');
     const downloadPngBtn = document.getElementById('download-png-btn');
+    const themeToggle    = document.getElementById('theme-toggle');
     const downloadProgress = document.getElementById('download-progress');
     const progressFill   = document.getElementById('progress-fill');
     const progressText   = document.getElementById('progress-text');
@@ -40,16 +41,19 @@
 
     let currentPackName = '';
 
-    // Blob 内存缓存：key = index, value = { gifBlob, pngBlob, actualExt }
-    // actualExt: 'gif' 表示该贴纸有真实 GIF，'png' 表示只有 PNG
+    // Blob cache: key = index, value = { gifBlob, pngBlob, actualExt }
     const blobCache = new Map();
+    const preloadTasks = new Map();
 
     let selectedSet = new Set();
+    let packVersion = 0;
 
     // ===== Init =====
     init();
 
     function init() {
+        initTheme();
+
         const params = new URLSearchParams(window.location.search);
         const idFromUrl = params.get('id');
         if (idFromUrl) {
@@ -83,6 +87,24 @@
         downloadGifBtn.addEventListener('click', () => downloadSelected('gif'));
         downloadPngBtn.addEventListener('click', () => downloadSelected('png'));
         copyShareBtn.addEventListener('click', onCopyShare);
+        themeToggle.addEventListener('click', toggleTheme);
+    }
+
+    function initTheme() {
+        let stored = null;
+        try { stored = localStorage.getItem('theme'); } catch (_) {}
+        const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+        setTheme(stored || (prefersDark ? 'dark' : 'light'));
+    }
+
+    function toggleTheme() {
+        const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+        setTheme(next);
+        try { localStorage.setItem('theme', next); } catch (_) {}
+    }
+
+    function setTheme(theme) {
+        document.documentElement.dataset.theme = theme;
     }
 
     // ===== Parse Input =====
@@ -111,6 +133,8 @@
         hideError();
         resultSection.style.display = 'none';
         blobCache.clear();
+        preloadTasks.clear();
+        packVersion++;
 
         try {
             const resp = await fetch(`/api/sticker?id=${encodeURIComponent(id)}`);
@@ -145,8 +169,7 @@
             renderGrid();
             resultSection.style.display = '';
 
-            // 后台加载所有图片 Blob（检测类型 + 预缓存）
-            preloadAll();
+            preloadAll(packVersion);
 
         } catch (err) {
             showError(err.message || '获取失败，请检查ID是否正确');
@@ -155,71 +178,91 @@
         }
     }
 
-    // ===== 预加载：同时完成类型检测 + Blob 缓存 =====
-    // 策略：先 fetch GIF；若 content-type 是 gif → 动图，缓存 gifBlob；
-    //       若返回非 gif（服务器给的是 PNG 占位）→ 静图，缓存 pngBlob。
-    async function preloadAll() {
-        const CONCURRENCY = 4; // 并发数，避免浏览器连接数限制
+    async function preloadAll(version) {
+        const CONCURRENCY = 4;
 
-        async function loadOne(sticker, index) {
-            try {
-                // 1. 尝试加载 GIF
-                const gifResp = await fetch(sticker.gifUrl);
-                if (gifResp.ok) {
-                    const gifBlob = await gifResp.blob();
-                    if (gifBlob.type.includes('gif') && gifBlob.size > 500) {
-                        // 真实动图
-                        sticker.isAnimated = true;
-                        blobCache.set(index, { gifBlob, pngBlob: null, actualExt: 'gif' });
-                        // 懒加载 PNG（下载时按需）
-                    } else {
-                        // GIF 请求返回的是 PNG（无动图版本）
-                        sticker.isAnimated = false;
-                        blobCache.set(index, { gifBlob: null, pngBlob: gifBlob, actualExt: 'png' });
-                    }
-                } else {
-                    // GIF 不存在，加载 PNG
-                    const pngResp = await fetch(sticker.pngUrl);
-                    sticker.isAnimated = false;
-                    const pngBlob = pngResp.ok ? await pngResp.blob() : null;
-                    blobCache.set(index, { gifBlob: null, pngBlob, actualExt: 'png' });
-                }
-            } catch {
-                sticker.isAnimated = false;
-                blobCache.set(index, { gifBlob: null, pngBlob: null, actualExt: 'png' });
-            }
-            updateItemBadge(index, sticker.isAnimated);
-        }
-
-        // 分批并发
         for (let i = 0; i < currentStickers.length; i += CONCURRENCY) {
             const batch = currentStickers
                 .slice(i, i + CONCURRENCY)
-                .map((s, j) => loadOne(s, i + j));
+                .map((_, j) => preloadSticker(i + j, version));
             await Promise.allSettled(batch);
         }
     }
 
-    // 如果 PNG blob 还没缓存（动图包但用户选择了下载PNG），按需补充
-    async function ensurePngBlob(index) {
-        const cached = blobCache.get(index);
-        if (!cached) return null;
+    async function preloadSticker(index, version = packVersion) {
+        if (preloadTasks.has(index)) return preloadTasks.get(index);
+
+        const task = (async () => {
+            const sticker = currentStickers[index];
+            let entry = { gifBlob: null, pngBlob: null, actualExt: 'png' };
+
+            try {
+                const gifResp = await fetch(sticker.gifUrl);
+                if (gifResp.ok) {
+                    const gifBlob = await gifResp.blob();
+                    if (await isGifBlob(gifBlob)) {
+                        sticker.isAnimated = true;
+                        entry = { gifBlob, pngBlob: null, actualExt: 'gif' };
+                    } else {
+                        sticker.isAnimated = false;
+                        entry = { gifBlob: null, pngBlob: gifBlob, actualExt: 'png' };
+                    }
+                } else {
+                    const pngResp = await fetch(sticker.pngUrl);
+                    sticker.isAnimated = false;
+                    entry.pngBlob = pngResp.ok ? await pngResp.blob() : null;
+                }
+            } catch {
+                sticker.isAnimated = false;
+            }
+
+            if (version === packVersion) blobCache.set(index, entry);
+            return entry;
+        })();
+
+        preloadTasks.set(index, task);
+        return task;
+    }
+
+    async function isGifBlob(blob) {
+        if (!blob || blob.size <= 500) return false;
+        if (blob.type?.toLowerCase().includes('gif')) return true;
+        try {
+            const header = await blob.slice(0, 6).text();
+            return header === 'GIF87a' || header === 'GIF89a';
+        } catch {
+            return false;
+        }
+    }
+
+    async function ensurePngBlob(index, version = packVersion) {
+        let cached = blobCache.get(index);
+        if (!cached) cached = await preloadSticker(index, version);
         if (cached.pngBlob) return cached.pngBlob;
         try {
             const resp = await fetch(currentStickers[index].pngUrl);
             if (resp.ok) {
                 cached.pngBlob = await resp.blob();
+                if (version === packVersion) blobCache.set(index, cached);
             }
         } catch (_) {}
         return cached.pngBlob || null;
     }
 
-    function updateItemBadge(index, isAnimated) {
-        const badge = stickerGrid.querySelector(`[data-index="${index}"] .type-badge`);
-        if (!badge) return;
-        badge.style.opacity = '1';
-        badge.textContent   = isAnimated ? 'GIF' : 'PNG';
-        badge.className     = `type-badge ${isAnimated ? 'gif' : 'png'}`;
+    async function getStickerBlob(index, type) {
+        const version = packVersion;
+        let cached = blobCache.get(index);
+        if (!cached) cached = await preloadSticker(index, version);
+        if (version !== packVersion) return null;
+
+        if (type === 'gif') {
+            if (cached.gifBlob) return { blob: cached.gifBlob, ext: 'gif' };
+            if (cached.pngBlob) return { blob: cached.pngBlob, ext: 'png' };
+            return null;
+        }
+
+        const pngBlob = cached.pngBlob || await ensurePngBlob(index, version);
+        return pngBlob ? { blob: pngBlob, ext: 'png' } : null;
     }
 
     // ===== Render Grid =====
@@ -240,7 +283,6 @@
                          onerror="this.onerror=null;this.src='${sticker.pngUrl}'"
                          alt="${sticker.name}"
                          loading="lazy">
-                    <span class="type-badge" style="opacity:0.4;">…</span>
                 </div>
                 <div class="sticker-item-name" title="${sticker.name}">${sticker.name}</div>
             `;
@@ -309,7 +351,7 @@
         // 按原始顺序排列（保证编号连续）
         const indices = Array.from(selectedSet).sort((a, b) => a - b);
         const total   = indices.length;
-        const padLen  = String(total).length; // 位数：10张→2位，100张→3位
+        const padLen  = String(total).length;
         let completed = 0;
 
         downloadProgress.style.display = 'flex';
@@ -319,52 +361,30 @@
         downloadPngBtn.disabled        = true;
 
         try {
+            if (total === 1) {
+                const idx = indices[0];
+                const sticker = currentStickers[idx];
+                const file = await getStickerBlob(idx, type);
+                if (!file?.blob) throw new Error('No downloadable image found');
+
+                progressFill.style.width = '100%';
+                progressText.textContent = '100%';
+                saveAs(file.blob, `${safeFileName(sticker.name)}.${file.ext}`);
+                return;
+            }
+
+            const packFileName = safeFileName(currentPackName);
             const zip    = new JSZip();
-            const folder = zip.folder(currentPackName);
+            const folder = zip.folder(packFileName);
 
             for (let rank = 0; rank < indices.length; rank++) {
                 const idx     = indices[rank];
                 const sticker = currentStickers[idx];
-                const cached  = blobCache.get(idx);
-
-                // 序号前缀：01. / 001.
                 const seq = String(rank + 1).padStart(padLen, '0');
+                const file = await getStickerBlob(idx, type);
 
-                let blob = null;
-                let ext  = type;
-
-                if (type === 'gif') {
-                    if (cached?.gifBlob) {
-                        blob = cached.gifBlob;
-                        ext  = 'gif';
-                    } else if (cached?.pngBlob) {
-                        // 该贴纸只有 PNG（无动图），降级使用 PNG
-                        blob = cached.pngBlob;
-                        ext  = 'png';
-                    }
-                } else {
-                    // type === 'png'
-                    if (cached?.pngBlob) {
-                        blob = cached.pngBlob;
-                        ext  = 'png';
-                    } else if (!cached?.pngBlob && cached) {
-                        // 动图包但 PNG 未缓存，按需补充
-                        blob = await ensurePngBlob(idx);
-                        ext  = 'png';
-                    }
-                }
-
-                // 最终兜底：重新 fetch（命中浏览器缓存，几乎无开销）
-                if (!blob) {
-                    try {
-                        const url  = type === 'gif' ? sticker.gifUrl : sticker.pngUrl;
-                        const resp = await fetch(url);
-                        if (resp.ok) { blob = await resp.blob(); }
-                    } catch (_) {}
-                }
-
-                if (blob) {
-                    folder.file(`${seq}.${sticker.name}.${ext}`, blob, { binary: true });
+                if (file?.blob) {
+                    folder.file(`${seq}.${safeFileName(sticker.name)}.${file.ext}`, file.blob, { binary: true });
                 }
 
                 completed++;
@@ -373,7 +393,6 @@
                 progressText.textContent = `${pct}%`;
             }
 
-            // 生成 ZIP（图片本身已压缩，用 STORE 更快；GIF/PNG 再压无意义）
             const zipBlob = await zip.generateAsync({
                 type:        'blob',
                 compression: 'STORE',
@@ -382,7 +401,7 @@
                 progressText.textContent = `打包 ${Math.round(percent)}%`;
             });
 
-            saveAs(zipBlob, `${currentPackName}_${type}.zip`);
+            saveAs(zipBlob, `${packFileName}_${type}.zip`);
 
         } catch (err) {
             showError('下载失败: ' + (err.message || '未知错误'));
@@ -391,6 +410,10 @@
             downloadPngBtn.disabled = selectedSet.size === 0;
             setTimeout(() => { downloadProgress.style.display = 'none'; }, 1500);
         }
+    }
+
+    function safeFileName(name) {
+        return String(name || 'sticker').replace(/[\\/:*?"<>|]/g, '_').trim() || 'sticker';
     }
 
     // ===== Share =====

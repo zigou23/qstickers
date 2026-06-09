@@ -14,7 +14,7 @@ export async function onRequestGet(context) {
     const id = url.searchParams.get('id');
 
     if (!id || !/^\d+$/.test(id)) {
-        return new Response(JSON.stringify({ error: '请提供有效的表情包ID' }), {
+        return new Response(JSON.stringify({ error: 'Please provide a valid sticker pack ID.' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });
@@ -29,7 +29,7 @@ export async function onRequestGet(context) {
         });
 
         if (!resp.ok) {
-            return new Response(JSON.stringify({ error: '表情包不存在或接口异常' }), {
+            return new Response(JSON.stringify({ error: 'Sticker pack not found or upstream API error.' }), {
                 status: 404,
                 headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
             });
@@ -38,7 +38,7 @@ export async function onRequestGet(context) {
         const raw = await resp.json();
 
         if (!raw || !raw.imgs || raw.imgs.length === 0) {
-            return new Response(JSON.stringify({ error: '表情包数据为空' }), {
+            return new Response(JSON.stringify({ error: 'Sticker pack data is empty.' }), {
                 status: 404,
                 headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
             });
@@ -73,7 +73,7 @@ export async function onRequestGet(context) {
             },
         });
     } catch (err) {
-        return new Response(JSON.stringify({ error: '获取失败: ' + err.message }), {
+        return new Response(JSON.stringify({ error: 'Failed to fetch sticker pack: ' + err.message }), {
             status: 500,
             headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });

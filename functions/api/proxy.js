@@ -21,7 +21,7 @@ export async function onRequestGet(context) {
     const targetUrl = reqUrl.searchParams.get('url');
 
     if (!targetUrl) {
-        return new Response(JSON.stringify({ error: '缺少 url 参数' }), {
+        return new Response(JSON.stringify({ error: 'Missing url parameter.' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });
@@ -31,7 +31,7 @@ export async function onRequestGet(context) {
     try {
         parsed = new URL(targetUrl);
     } catch {
-        return new Response(JSON.stringify({ error: '无效的 URL' }), {
+        return new Response(JSON.stringify({ error: 'Invalid URL.' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });
@@ -39,7 +39,7 @@ export async function onRequestGet(context) {
 
     // Security: only allow whitelisted hosts
     if (!ALLOWED_HOSTS.includes(parsed.hostname)) {
-        return new Response(JSON.stringify({ error: '不允许代理此域名' }), {
+        return new Response(JSON.stringify({ error: 'This domain is not allowed.' }), {
             status: 403,
             headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });
@@ -73,7 +73,7 @@ export async function onRequestGet(context) {
 
         return new Response(body, { status: 200, headers });
     } catch (err) {
-        return new Response(JSON.stringify({ error: '代理请求失败: ' + err.message }), {
+        return new Response(JSON.stringify({ error: 'Proxy request failed: ' + err.message }), {
             status: 502,
             headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });
